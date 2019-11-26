@@ -148,7 +148,11 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       background_compaction_scheduled_(false),
       manual_compaction_(nullptr),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
-                               &internal_comparator_)) {}
+                               &internal_comparator_)) {
+      //初始化scaledKV
+      //scale_kv_nvm = new scaledkv::NVMScaledKV();
+      //scale_kv_nvm->Initialize(10, KEY_SIZE, buf_size);                  
+  }
 
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
@@ -177,6 +181,8 @@ DBImpl::~DBImpl() {
   if (owns_cache_) {
     delete options_.block_cache;
   }
+  //删除scaledkv
+  //AllocatorExit();
 }
 
 Status DBImpl::NewDB() {
@@ -498,6 +504,13 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   return status;
 }
 
+Status InsertToScaled(scaledkv::NVMScaledKV *scale_kv_nvm,MemTable* mem){
+  iter->SeekToFirst();
+  for(;it->Valid();it->Next()){
+    scaled_kv_num->Insert(it->key(),it->value());
+  }
+}
+
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
@@ -512,9 +525,12 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   Status s;
   {
     mutex_.Unlock();
+    //向comboTree插入数据
+    //s = InsertToScaled(scale_kv_nvm,iter);
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
   }
+
 
   Log(options_.info_log, "Level-0 table #%llu: %lld bytes %s",
       (unsigned long long)meta.number, (unsigned long long)meta.file_size,
@@ -550,7 +566,7 @@ void DBImpl::CompactMemTable() {
   VersionEdit edit;
   Version* base = versions_->current();
   base->Ref();
-  Status s = WriteLevel0Table(imm_, &edit, base);
+  Status s = WriteLevel0Table(imm_, &edit, base); 
   base->Unref();
 
   if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
@@ -1142,6 +1158,8 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     } else {
       s = current->Get(options, lkey, value, &stats);
       have_stat_update = true;
+      //从ComboTree中查找给定key
+      //*value =scale_kv_nvm->Get(key);
     }
     mutex_.Lock();
   }
